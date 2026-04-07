@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>Agenda Profissional</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body { margin:0; font-family:Arial; background:linear-gradient(135deg,#4f46e5,#06b6d4); color:white; }
+#login { display:flex; height:100vh; justify-content:center; align-items:center; }
+.login-box { background:rgba(0,0,0,0.4); padding:30px; border-radius:15px; text-align:center; }
+.login-box input { margin:10px 0; padding:10px; width:200px; border-radius:8px; border:none; }
+.login-box button { padding:10px; width:100%; border-radius:8px; border:none; background:#22c55e; color:white; }
+
+#app { display:none; padding:15px; }
+.topo { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom:20px; }
+
+button { padding:8px; border-radius:10px; border:none; cursor:pointer; }
+
+.dia { background:rgba(255,255,255,0.1); padding:15px; margin:15px 0; border-radius:15px; }
+.equipe { margin:10px 0; padding:10px; border-radius:10px; background:rgba(0,0,0,0.2); }
+
+.servico { display:flex; gap:5px; margin:5px 0; flex-wrap:wrap; }
+
+input, select { padding:6px; border-radius:8px; border:none; }
+
+.pendente { background:#ef4444; }
+.andamento { background:#fde68a; color:black; }
+.concluido { background:#22c55e; }
+</style>
+</head>
+
+<body>
+
+<div id="login">
+  <div class="login-box">
+    <h2>Login</h2>
+    <input type="text" id="user" placeholder="Usuário">
+    <input type="password" id="pass" placeholder="Senha">
+    <button id="btnLogin">Entrar</button>
+  </div>
+</div>
+
+<div id="app">
+
+<h1>Agenda de Equipes</h1>
+
+<div class="topo">
+  <input type="month" id="mesSelecionado">
+  <button id="btnSalvar">💾 Salvar</button>
+  <button id="btnEquipes">📊 Equipes</button>
+  <button id="btnMedicoes">📋 Medições</button>
+  <button id="btnVendedores">🧑‍💼 Vendedores</button>
+  <button id="btnLimpar">🗑️ Limpar</button>
+</div>
+
+<div id="agenda"></div>
+
+</div>
+
+<!-- FIREBASE V8 -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+
+// 🔥 CONFIG FIREBASE (SUA REAL)
+const firebaseConfig = {
+  apiKey: "AIzaSyAGDQgG8ncmQGCA1XwlCoArX_XXlxkgpjk",
+  authDomain: "agenda-tubogas.firebaseapp.com",
+  databaseURL: "https://agenda-tubogas-default-rtdb.firebaseio.com",
+  projectId: "agenda-tubogas",
+  storageBucket: "agenda-tubogas.firebasestorage.app",
+  messagingSenderId: "693390772902",
+  appId: "1:693390772902:web:bbbd3b65067ae51a214267"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// ELEMENTOS
+const btnLogin = document.getElementById("btnLogin");
+const login = document.getElementById("login");
+const app = document.getElementById("app");
+const user = document.getElementById("user");
+const pass = document.getElementById("pass");
+
+const mesSelecionado = document.getElementById("mesSelecionado");
+const agenda = document.getElementById("agenda");
+
+// BOTÕES
+document.getElementById("btnSalvar").onclick = salvarTudo;
+document.getElementById("btnEquipes").onclick = relatorioEquipes;
+document.getElementById("btnMedicoes").onclick = relatorioMedicoes;
+document.getElementById("btnVendedores").onclick = relatorioVendedores;
+document.getElementById("btnLimpar").onclick = limparTudo;
+
+// 🔐 LOGIN
+btnLogin.onclick = () => {
+  let u = user.value.trim().toLowerCase();
+  let p = pass.value.trim();
+
+  if(u==="1") u="administrador";
+
+  if(u==="administrador" && p==="0502"){
+    login.style.display="none";
+    app.style.display="block";
+  } else {
+    alert("Login inválido");
+  }
+};
+
+pass.addEventListener("keypress",e=>{
+  if(e.key==="Enter") btnLogin.click();
+});
+
+// 📌 DADOS
+let nomes=["Rodrigo","Jocimar","Maicon","Roberto","Robson","João","Ricardo","Equipe 8"];
+let vendedores=["Dyego","Edenilson","Deivid"];
+
+// 📅 DATA
+function formatarData(d){
+  let dia=String(d.getDate()).padStart(2,'0');
+  let m=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+  return `${dia} de ${m[d.getMonth()]} de ${d.getFullYear()}`;
+}
+
+// 🎨 COR
+function aplicarCor(el,s){
+  el.classList.remove("pendente","andamento","concluido");
+  if(s==="Pendente") el.classList.add("pendente");
+  if(s==="Em andamento") el.classList.add("andamento");
+  if(s==="Concluído") el.classList.add("concluido");
+}
+
+// ➕ ADD
+function adicionarServico(container, dados=null){
+  let box=document.createElement("div");
+  box.className="servico";
+
+  let input=document.createElement("input");
+  input.value = dados?.texto || "";
+
+  let status=document.createElement("select");
+  ["Pendente","Em andamento","Concluído"].forEach(s=>{
+    let o=document.createElement("option");
+    o.value=s;
+    o.textContent=s;
+    if(dados && dados.status===s) o.selected=true;
+    status.appendChild(o);
+  });
+
+  let check=document.createElement("input");
+  check.type="checkbox";
+  check.checked = dados?.medicao || false;
+
+  let vendedor=document.createElement("select");
+  vendedores.forEach(v=>{
+    let o=document.createElement("option");
+    o.value=v;
+    o.textContent=v;
+    if(dados && dados.vendedor===v) o.selected=true;
+    vendedor.appendChild(o);
+  });
+
+  let del=document.createElement("button");
+  del.textContent="X";
+  del.onclick=()=>box.remove();
+
+  status.onchange=()=>aplicarCor(box,status.value);
+  aplicarCor(box, status.value);
+
+  box.append(input,status,check,vendedor,del);
+  container.appendChild(box);
+}
+
+// 📅 GERAR
+function gerarAgenda(){
+  agenda.innerHTML="";
+  let [ano,mes]=mesSelecionado.value.split("-");
+  let data=new Date(ano,mes-1,1);
+
+  while(data.getMonth()==(mes-1)){
+    if(data.getDay()>=1 && data.getDay()<=5){
+
+      let dia=document.createElement("div");
+      dia.className="dia";
+      dia.innerHTML=`<strong>${formatarData(data)}</strong>`;
+
+      nomes.forEach(nome=>{
+        let eq=document.createElement("div");
+        eq.className="equipe";
+
+        let titulo=document.createElement("div");
+        titulo.textContent=nome;
+
+        let container=document.createElement("div");
+
+        let btn=document.createElement("button");
+        btn.textContent="+";
+        btn.onclick=()=>adicionarServico(container);
+
+        eq.append(titulo,container,btn);
+        dia.appendChild(eq);
+      });
+
+      agenda.appendChild(dia);
+    }
+    data.setDate(data.getDate()+1);
+  }
+}
+
+// 💾 SALVAR
+function salvarTudo(){
+  let mes = mesSelecionado.value;
+  let dados=[];
+
+  document.querySelectorAll(".dia").forEach(dia=>{
+    let data=dia.querySelector("strong").textContent;
+
+    dia.querySelectorAll(".equipe").forEach(eq=>{
+      let nome=eq.children[0].textContent;
+
+      eq.querySelectorAll(".servico").forEach(s=>{
+        let texto=s.children[0].value;
+        if(!texto) return;
+
+        dados.push({
+          data,
+          equipe:nome,
+          texto,
+          status:s.children[1].value,
+          medicao:s.children[2].checked,
+          vendedor:s.children[3].value
+        });
+      });
+    });
+  });
+
+  db.ref("agenda/" + mes).set(dados)
+    .then(()=> alert("☁️ Salvo na nuvem!"))
+    .catch(()=> alert("Erro ao salvar"));
+}
+
+// 🔄 CARREGAR
+let refAtual = null;
+
+function escutarDados(){
+  let mes = mesSelecionado.value;
+
+  if(refAtual) refAtual.off();
+
+  refAtual = db.ref("agenda/" + mes);
+
+  refAtual.on("value", snap=>{
+    let dados=snap.val();
+
+    document.querySelectorAll(".servico").forEach(e=>e.remove());
+
+    if(!dados) return;
+
+    dados.forEach(item=>{
+      document.querySelectorAll(".dia").forEach(dia=>{
+        let dataTela=dia.querySelector("strong").textContent;
+
+        if(dataTela===item.data){
+          dia.querySelectorAll(".equipe").forEach(eq=>{
+            let nome=eq.children[0].textContent;
+
+            if(nome===item.equipe){
+              adicionarServico(eq.children[1], item);
+            }
+          });
+        }
+      });
+    });
+  });
+}
+
+// 📊 RELATÓRIOS (FUNCIONANDO)
+function relatorioEquipes(){
+  let cont={};
+
+  document.querySelectorAll(".equipe").forEach(eq=>{
+    let nome=eq.children[0].textContent;
+
+    eq.querySelectorAll(".servico").forEach(s=>{
+      let status=s.children[1].value;
+
+      if(!cont[nome]) cont[nome]={total:0,concluidos:0};
+
+      cont[nome].total++;
+      if(status==="Concluído") cont[nome].concluidos++;
+    });
+  });
+
+  let txt="📊 RELATÓRIO DE EQUIPES\n\n";
+
+  for(let n in cont){
+    let total=cont[n].total;
+    let concl=cont[n].concluidos;
+    let perc = total ? Math.round((concl/total)*100) : 0;
+
+    txt+=`${n}\nTotal: ${total}\nConcluídos: ${concl}\n${perc}%\n\n`;
+  }
+
+  alert(txt);
+}
+
+function relatorioMedicoes(){
+  let txt="📋 RELATÓRIO DE MEDIÇÕES\n\n";
+
+  document.querySelectorAll(".equipe").forEach(eq=>{
+    let equipe=eq.children[0].textContent;
+
+    eq.querySelectorAll(".servico").forEach(s=>{
+      if(s.children[2].checked){
+        txt+=`Equipe: ${equipe}\nServiço: ${s.children[0].value}\nVendedor: ${s.children[3].value}\n\n`;
+      }
+    });
+  });
+
+  if(txt==="📋 RELATÓRIO DE MEDIÇÕES\n\n"){
+    txt+="Nenhuma medição marcada.";
+  }
+
+  alert(txt);
+}
+
+function relatorioVendedores(){
+  let cont={};
+
+  document.querySelectorAll(".servico").forEach(s=>{
+    let v=s.children[3].value;
+    if(!v) return;
+    cont[v]=(cont[v]||0)+1;
+  });
+
+  let txt="🧑‍💼 RELATÓRIO DE VENDEDORES\n\n";
+
+  for(let v in cont){
+    txt+=`${v}: ${cont[v]} serviços\n`;
+  }
+
+  if(Object.keys(cont).length===0){
+    txt+="Nenhum serviço encontrado.";
+  }
+
+  alert(txt);
+}
+
+// 🗑️ LIMPAR
+function limparTudo(){
+  let mes = mesSelecionado.value;
+
+  if(confirm("Apagar tudo?")){
+    db.ref("agenda/" + mes).set([]);
+  }
+}
+
+// 🚀 START
+let hoje=new Date();
+mesSelecionado.value=hoje.getFullYear()+"-"+String(hoje.getMonth()+1).padStart(2,'0');
+
+mesSelecionado.onchange=()=>{
+  gerarAgenda();
+  escutarDados();
+};
+
+gerarAgenda();
+escutarDados();
+
+});
+</script>
+
+</body>
+</html>
